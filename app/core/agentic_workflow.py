@@ -13,6 +13,7 @@ from app.core.credential_logic import profile_manager
 from app.core.vision_engine import VisionEngine
 from fpdf import FPDF
 import tempfile
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,18 @@ class JobApplicationAgent:
         self.vision = VisionEngine()
         self.driver = None
 
+    def get_chrome_main_version(self) -> int:
+        """Dynamically fetches the major version of the installed Google Chrome."""
+        try:
+            result = subprocess.run(['google-chrome', '--version'], capture_output=True, text=True)
+            # Output looks like: "Google Chrome 145.0.7632.109 "
+            version_str = result.stdout.strip().split(' ')[2]
+            main_version = int(version_str.split('.')[0])
+            return main_version
+        except Exception as e:
+            logger.warning(f"Failed to fetch Chrome version dynamically: {e}")
+            return 145 # Fallback to a recent high version
+
     def initialize_browser(self):
         """Initializes undetected-chromedriver attached to Xvfb display."""
         update_state("Initializing Browser", "Starting Chrome in watchable mode...")
@@ -51,7 +64,10 @@ class JobApplicationAgent:
         # Run normally inside VNC instead of standard headless mode
         # By removing options.add_argument("--headless=new"), it runs visibly in Xvfb
         
-        self.driver = uc.Chrome(options=options, version_main=121)  # specify nearest version if needed
+        main_version = self.get_chrome_main_version()
+        update_state("Browser Init", f"Detected Chrome v{main_version}. Launching Driver...")
+        
+        self.driver = uc.Chrome(options=options, version_main=main_version)
         update_state("Browser Ready", "Successfully started undetected-chromedriver.")
 
     def rewrite_resume(self, job_description: str) -> str:
