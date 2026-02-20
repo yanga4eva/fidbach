@@ -1,11 +1,13 @@
-FROM python:3.11-slim
+# Use NVIDIA's PyTorch base image which has CUDA pre-installed for Ollama acceleration
+FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
 
-# Prevent Python from writing .pyc files and enable unbuffered output
+# Prevent Python from writing .pyc files, enable unbuffered output, set timezone to avoid tzdata prompt
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC
 
-# Install system dependencies required for Chromium, Xvfb, VNC, and OpenCV
+# Install system dependencies required for Chromium, Xvfb, VNC, OpenCV, Python, and Ollama
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     gnupg \
@@ -31,11 +33,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     fonts-liberation \
     xdg-utils \
-    # Additional deps for opencv / cv2
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
+    pciutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Chrome Browser
@@ -43,6 +48,13 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearm
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
+
+# Map python3 to python3.11 for consistency
+RUN ln -sf /usr/bin/python3.11 /usr/bin/python \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3
+
+# Install Ollama
+RUN curl -fsSL https://ollama.com/install.sh | sh
 
 # Create the working directory
 WORKDIR /app
@@ -53,8 +65,8 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create VNC directory
-RUN mkdir -p /root/.vnc
+# Create VNC directory and Ollama data directory
+RUN mkdir -p /root/.vnc /root/.ollama
 
 # Copy the application code
 COPY . /app
@@ -63,7 +75,8 @@ COPY . /app
 # 8080: noVNC
 # 8501: Streamlit
 # 8000: FastAPI
-EXPOSE 8080 8501 8000
+# 11434: Ollama API
+EXPOSE 8080 8501 8000 11434
 
 # Copy the entrypoint script
 COPY docker-entrypoint.sh /usr/local/bin/

@@ -8,6 +8,25 @@ export VNC_RESOLUTION=${VNC_RESOLUTION:-1920x1080x24}
 # Extract just the geometry WxH
 export SCREEN_GEOMETRY=$(echo "$VNC_RESOLUTION" | cut -d'x' -f1,2)
 
+# --- OLLAMA SETUP ---
+echo ">>> Starting Ollama Server in the background..."
+ollama serve &
+OLLAMA_PID=$!
+sleep 5
+
+echo ">>> Checking Ollama required models..."
+# Download DeepSeek R1 if not present (this will take a few minutes on first boot)
+if ! ollama list | grep -q 'deepseek-r1:32b'; then
+    echo "Model deepseek-r1:32b not found locally. Pulling now... (This may take several minutes)."
+    ollama pull deepseek-r1:32b
+fi
+
+if ! ollama list | grep -q 'deepseek-vl2:tiny'; then
+    echo "Model deepseek-vl2:tiny not found locally. Pulling now..."
+    ollama pull deepseek-vl2:tiny
+fi
+
+# --- VNC & WATCHABLE POD SETUP ---
 echo ">>> Starting Xvfb on Display $DISPLAY with resolution $VNC_RESOLUTION..."
 Xvfb $DISPLAY -screen 0 $VNC_RESOLUTION -ac -r &
 XVFB_PID=$!
@@ -31,6 +50,7 @@ websockify --web /usr/share/novnc 8080 localhost:5900 &
 NOVNC_PID=$!
 sleep 2
 
+# --- AGENT STACK SETUP ---
 echo ">>> Starting FastAPI application (Background)..."
 # Start the FastAPI orchestrator/webhook service
 uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --workers 1 &
@@ -42,3 +62,4 @@ streamlit run app/ui/dashboard.py
 
 # Keep script running if streamlit dies for some reason
 wait $XVFB_PID
+wait $OLLAMA_PID
