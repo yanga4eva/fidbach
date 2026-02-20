@@ -213,11 +213,6 @@ class JobApplicationAgent:
                     name="Pause_For_Human",
                     func=self.request_manual_intervention,
                     description="Pauses the agent and asks the user for help (e.g., for CAPTCHAs, 2FA, or unknown screens). Input is the prompt/question to ask the user."
-                ),
-                Tool(
-                    name="Look_At_Screen",
-                    func=lambda question: agent_tools.look_at_screen(self.driver, self.vision, question),
-                    description="Acts as your eyes. Takes a screenshot of the current page and asks the vision model the question you provide. Use this to read CAPTCHAs, find hidden buttons, or understand visual modal popups. Input must be a specific question like 'Is there a CAPTCHA?' or 'What does the big red error say?'"
                 )
             ]
             
@@ -226,11 +221,14 @@ class JobApplicationAgent:
 
 {tools}
 
-You are an autonomous Job Application Agent. Your goal is to navigate the webpage, fill out the application form using the Get_Profile_Data tool, and click Submit.
-Look at the CURRENT SCREEN DOM below. Find the XPath for the inputs you need to fill, or the button you need to click to advance.
+You are an autonomous Job Application Agent. Look at the CURRENT SCREEN DOM and the CURRENT VISUAL SUMMARY below. 
+Find the XPath for the inputs you need to fill, or the button you need to click to advance.
 
 CURRENT SCREEN DOM:
 {current_dom}
+
+CURRENT VISUAL SUMMARY (From LLaVA):
+{vision_summary}
 
 Use the following format:
 
@@ -250,33 +248,64 @@ Thought:{agent_scratchpad}'''
 
             prompt = PromptTemplate.from_template(template)
             
-            # --- 4. Initialize Agent ---
+            # --- 4. Initialize Agent Object ---
             agent = create_react_agent(llm, tools, prompt)
-            agent_executor = AgentExecutor(
-                agent=agent, 
-                tools=tools, 
-                verbose=True,
-                handle_parsing_errors=True,
-                max_iterations=15 # Prevent infinite loops
-            )
             
-            # --- 5. Custom Execution Loop ---
-            # We wrap the executor so we can continually feed it the freshest DOM
+            # --- 5. Custom Orchestrator Loop ---
             update_state("Agent Loop Started", "Analyzing the DOM and reasoning next steps...")
             
-            # For this MVP, we give it a very broad instruction and let it run up to 15 iterations.
-            # In a full build, this would be a custom while loop, but AgentExecutor handles the 
-            # Thought -> Action -> Observation cycle natively. We just need to inject the DOM.
+            agent_scratchpad = ""
+            max_iterations = 15
             
-            raw_html = self.driver.page_source
-            clean_dom = compress_dom(raw_html)
-            
-            response = agent_executor.invoke({
-                "input": "Look at the DOM. Find the apply button, or fill out the application form. Keep going until the application is submitted.",
-                "current_dom": clean_dom
-            })
-            
-            update_state("Agent Finished", f"Final Output: {response.get('output')}")
+            for i in range(max_iterations):
+                update_state(f"Step {i+1}/{max_iterations}", "Perceiving Screen (DOM + Vision)...")
+                
+                # Retrieve Fresh DOM
+                raw_html = self.driver.page_source
+                clean_dom = compress_dom(raw_html)
+                
+                # Retrieve Fresh Vision
+                screenshot_path = "/tmp/agent_vision_loop.png"
+                self.driver.save_screenshot(screenshot_path)
+                vision_req = "Describe this page. Are there any forms, buttons, CAPTCHAs, or error messages?"
+                vision_res = self.vision._run_vision_prompt(screenshot_path, vision_req)
+                vision_summary = vision_res.get('raw_response', 'Failed to get vision summary.')
+                
+                # Execute ONE step of the ReAct Agent
+                response = agent.invoke({
+                    "input": "Look at the DOM and Visual Summary. Execute the next necessary action to progress the job application, or output Final Answer if submitted.",
+                    "current_dom": clean_dom,
+                    "vision_summary": vision_summary,
+                    "agent_scratchpad": agent_scratchpad,
+                    "intermediate_steps": [] # Required by LangChain internals
+                })
+                
+                # Process the Agent Action
+                # LangChain's create_react_agent returns AgentAction or AgentFinish
+                from langchain_core.agents import AgentAction, AgentFinish
+                
+                if isinstance(response, AgentFinish):
+                    update_state("Agent Finished", f"Final Output: {response.return_values['output']}")
+                    break
+                elif isinstance(response, AgentAction):
+                    action = response
+                    tool_name = action.tool
+                    tool_input = action.tool_input
+                    
+                    update_state("Executing Action", f"Tool: {tool_name} | Input: {tool_input}")
+                    
+                    # Find and execute the actual tool
+                    tool_obj = next((t for t in tools if t.name == tool_name), None)
+                    if tool_obj:
+                        observation = tool_obj.func(tool_input)
+                    else:
+                        observation = f"Tool {tool_name} not found."
+                    
+                    # Store history for the scratchpad
+                    agent_scratchpad += f"\nAction: {tool_name}\nAction Input: {tool_input}\nObservation: {observation}\nThought: "
+                    time.sleep(2) # Wait for page reaction
+            else:
+                update_state("Timeout", "Agent hit maximum iterations without finishing.")
             
         except Exception as e:
             update_state("Failed", f"Agent crashed during application: {e}")
