@@ -24,9 +24,10 @@ def click_element(driver: uc.Chrome, xpath: str) -> str:
     try:
         element = wait_for_element(driver, xpath, By.XPATH)
         # Scroll to it
-        driver.execute_script("arguments[0].scrollIntoView(true);", element)
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
         time.sleep(0.5)
-        element.click()
+        # Use javascript click to bypass any overlapping elements or modals
+        driver.execute_script("arguments[0].click();", element)
         time.sleep(2) # Wait for potential navigation or DOM changes
         return f"Successfully clicked element: {xpath}"
     except Exception as e:
