@@ -10,7 +10,7 @@ ApplyGenie is designed to run efficiently on GPU instances like RunPod, relying 
 - **Xvfb & noVNC**: Provides a virtual frame buffer (`:99`) allowing the `undetected-chromedriver` to run visibly in the cloud. You can monitor the agent's actions securely via a password-protected web VNC client on port `8080`.
 - **DeepSeek-R1 (32B)**: Driven by Ollama, this model is responsible for parsing Job Descriptions and intelligently rewriting the user's resume bullet points to bypass ATS filters.
 - **PDF Resume Engine**: The agent dynamically generates a compiled `.pdf` document of the tailored resume utilizing `fpdf2` directly in-memory before executing the application upload strategy.
-- **DeepSeek-VL2 (Tiny)**: Acts as the "Vision Specialist". Before submitting any application, this agent analyzes screenshots of the browser to ensure no required fields are missed, dropdowns are mapped correctly, and CAPTCHAs are detected.
+- **LLaVA (7B)**: Acts as the "Vision Specialist". Before submitting any application, this agent analyzes screenshots of the browser to ensure no required fields are missed, dropdowns are mapped correctly, and CAPTCHAs are detected.
 - **Streamlit Dashboard**: Hosted on port `8501`, providing a clean interface to input the user's compliance profile, view the generated **Master Password**, and monitor the live application logs.
 
 ## Setup & Deployment Instructions (RunPod)
@@ -23,7 +23,7 @@ Before pushing, ensure you have set the following secrets in your GitHub reposit
 - `DOCKER_PASSWORD` (A Docker Hub Access Token)
 
 ### Recommended Hardware (GPUs)
-Because ApplyGenie loads the `deepseek-r1:32b` and `deepseek-vl2:tiny` models directly into RAM/VRAM, you **must** select a GPU with at least **24GB of VRAM**.
+Because ApplyGenie loads the `deepseek-r1:32b` and `llava:7b` models directly into RAM/VRAM, you **must** select a GPU with at least **24GB of VRAM**.
 
 | GPU Model | VRAM | Performance Expectation |
 | :--- | :--- | :--- |

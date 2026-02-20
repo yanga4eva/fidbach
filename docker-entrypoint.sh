@@ -21,9 +21,9 @@ if ! ollama list | grep -q 'deepseek-r1:32b'; then
     ollama pull deepseek-r1:32b
 fi
 
-if ! ollama list | grep -q 'deepseek-vl2:tiny'; then
-    echo "Model deepseek-vl2:tiny not found locally. Pulling now..."
-    ollama pull deepseek-vl2:tiny
+if ! ollama list | grep -q 'llava:7b'; then
+    echo "Model llava:7b not found locally. Pulling now..."
+    ollama pull llava:7b
 fi
 
 # --- VNC & WATCHABLE POD SETUP ---

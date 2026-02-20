@@ -9,14 +9,14 @@ class VisionEngine:
     """
     Handles quality checks using DeepSeek-VL2 before submitting job applications.
     """
-    def __init__(self, ollama_url: str = None):
+    def __init__(self, ollama_url: str = ""):
         if not ollama_url:
             self.ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         else:
             self.ollama_url = ollama_url
-            
+            # We use llava:7b as the official vision model for Ollama
         self.generate_api_url = f"{self.ollama_url}/api/generate"
-        self.model = "deepseek-vl2:tiny"
+        self.model = "llava:7b"
 
     def _encode_image(self, image_path: str) -> str:
         """Encodes an image to base64 for Ollama API."""
