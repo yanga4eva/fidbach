@@ -287,13 +287,22 @@ Thought:{agent_scratchpad}'''
                 vision_summary = vision_res.get('raw_response', 'Failed to get vision summary.')
                 
                 # Execute ONE step of the ReAct Agent
-                response = agent.invoke({
-                    "input": "Look at the DOM and Visual Summary. Execute the next necessary action to progress the job application, or output Final Answer if submitted.",
-                    "current_dom": clean_dom,
-                    "vision_summary": vision_summary,
-                    "agent_scratchpad": agent_scratchpad,
-                    "intermediate_steps": [] # Required by LangChain internals
-                })
+                try:
+                    response = agent.invoke({
+                        "input": "Look at the DOM and Visual Summary. Execute the next necessary action to progress the job application, or output Final Answer if submitted.",
+                        "current_dom": clean_dom,
+                        "vision_summary": vision_summary,
+                        "agent_scratchpad": agent_scratchpad,
+                        "intermediate_steps": [] # Required by LangChain internals
+                    })
+                except Exception as parse_error:
+                    update_state("Parsing Error", f"Agent output format issue: {parse_error}")
+                    # Feed the parsing error back as an observation so the LLM corrects its formatting
+                    observation = f"Failed to parse LLM output. You MUST only output one Action and Action Input string. Error: {str(parse_error)}"
+                    agent_scratchpad += f"\nObservation: {observation}\nThought: "
+                    time.sleep(2)
+                    continue
+
                 
                 # Process the Agent Action
                 # LangChain's create_react_agent returns AgentAction or AgentFinish
