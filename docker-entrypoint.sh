@@ -57,8 +57,8 @@ uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --workers 1 &
 FASTAPI_PID=$!
 
 echo ">>> Starting Streamlit UI (Foreground)..."
-# Start Streamlit on port 8501. It runs in the foreground, keeping the container alive.
-streamlit run app/ui/dashboard.py
+# Start Streamlit on port 8501 headlessly so it doesn't block on the email telemetry prompt.
+streamlit run app/ui/dashboard.py --server.headless true
 
 # Keep script running if streamlit dies for some reason
 wait $XVFB_PID
