@@ -22,7 +22,7 @@ services:
               capabilities: [ gpu ]
 
   applygenie:
-    build: .
+    image: yanga4/applygenie:latest
     container_name: applygenie_agent
     environment:
       # We connect back to the ollama service on the custom network
