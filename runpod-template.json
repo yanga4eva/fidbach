@@ -1,0 +1,17 @@
+{
+  "name": "ApplyGenie-Monolithic",
+  "imageName": "yanga4/applygenie:latest",
+  "dockerArgs": "",
+  "containerDiskInGb": 40,
+  "volumeInGb": 50,
+  "volumeMountPath": "/workspace",
+  "ports": "8080/tcp, 8501/tcp, 8000/tcp",
+  "env": [
+    {
+      "key": "VNC_PASSWORD",
+      "value": "applygenie2026"
+    }
+  ],
+  "isServerless": false,
+  "readme": "Monolithic ApplyGenie Agent running DeepSeek-R1 (32B) and DeepSeek-VL2 (Tiny). Exposes noVNC on 8080 and Streamlit on 8501."
+}
