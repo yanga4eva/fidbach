@@ -41,8 +41,8 @@ Because the image is hosted on Docker Hub and contains the entire stack, you do 
 - **Container Image:** `yanga4/applygenie:latest`
 - **Container Disk:** 40 GB
 - **Volume Disk:** 50 GB (To store the 20GB DeepSeek AI models persistently)
-- **Expose HTTP Ports:** (Leave blank)
-- **Expose TCP Ports:** `8080, 8501, 8000`
+- **Expose HTTP Ports:** `8080, 8501, 8000`
+- **Expose TCP Ports:** (Leave blank)
 - **Environment Variables:**
   - Key: `VNC_PASSWORD` | Value: `your_secure_password` (Optional, defaults to applygenie2026)
 

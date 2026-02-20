@@ -5,7 +5,7 @@
   "containerDiskInGb": 40,
   "volumeInGb": 50,
   "volumeMountPath": "/workspace",
-  "ports": "8080/tcp, 8501/tcp, 8000/tcp",
+  "ports": "8080/http, 8501/http, 8000/http",
   "env": [
     {
       "key": "VNC_PASSWORD",
