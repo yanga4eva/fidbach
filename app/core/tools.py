@@ -8,6 +8,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import undetected_chromedriver as uc
 
 from app.core.credential_logic import profile_manager
+from app.core.vision_engine import VisionEngine
 
 logger = logging.getLogger(__name__)
 
@@ -53,3 +54,22 @@ def get_profile_data(field: str) -> str:
         
     profile = profile_manager.get_profile()
     return profile.get(field, f"[{field} not found in profile]")
+
+def look_at_screen(driver: uc.Chrome, vision_engine: VisionEngine, question: str) -> str:
+    """
+    Takes a screenshot of the current browser and asks the LLaVA vision model a question about it.
+    """
+    try:
+        screenshot_path = "/tmp/agent_vision_req.png"
+        driver.save_screenshot(screenshot_path)
+        
+        # We bypass the specific prompt helpers and hit the internal runner directly
+        # so the agent can ask custom questions
+        result = vision_engine._run_vision_prompt(screenshot_path, question)
+        
+        if result["success"]:
+            return f"Vision Analysis: {result['raw_response']}"
+        else:
+            return f"Vision Error: {result['error']}"
+    except Exception as e:
+        return f"Failed to capture screen: {str(e)}"

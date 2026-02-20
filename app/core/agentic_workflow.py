@@ -213,6 +213,11 @@ class JobApplicationAgent:
                     name="Pause_For_Human",
                     func=self.request_manual_intervention,
                     description="Pauses the agent and asks the user for help (e.g., for CAPTCHAs, 2FA, or unknown screens). Input is the prompt/question to ask the user."
+                ),
+                Tool(
+                    name="Look_At_Screen",
+                    func=lambda question: agent_tools.look_at_screen(self.driver, self.vision, question),
+                    description="Acts as your eyes. Takes a screenshot of the current page and asks the vision model the question you provide. Use this to read CAPTCHAs, find hidden buttons, or understand visual modal popups. Input must be a specific question like 'Is there a CAPTCHA?' or 'What does the big red error say?'"
                 )
             ]
             
