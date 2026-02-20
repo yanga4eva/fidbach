@@ -22,6 +22,16 @@ Before pushing, ensure you have set the following secrets in your GitHub reposit
 - `DOCKER_USERNAME` (Your Docker Hub username: `yanga4`)
 - `DOCKER_PASSWORD` (A Docker Hub Access Token)
 
+### Recommended Hardware (GPUs)
+Because ApplyGenie loads the `deepseek-r1:32b` and `deepseek-vl2:tiny` models directly into RAM/VRAM, you **must** select a GPU with at least **24GB of VRAM**.
+
+| GPU Model | VRAM | Performance Expectation |
+| :--- | :--- | :--- |
+| **RTX 3090 / 4090** | 24 GB | **Great.** Lowest cost option, models fit perfectly. |
+| **RTX A5000** | 24 GB | **Great.** Enterprise alternative to the 3090/4090. |
+| **RTX A6000** | 48 GB | **Excellent.** Much faster generation, but higher hourly cost. |
+| **A100 (40GB/80GB)** | 40-80 GB | **Overkill.** Unnecessary for a single agent, very expensive. |
+
 ### Deploying to RunPod
 Because the image is hosted on Docker Hub and contains the entire stack, you do **not** need to use the terminal. You can deploy it natively via the RunPod UI!
 
