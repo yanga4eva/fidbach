@@ -236,8 +236,11 @@ class JobApplicationAgent:
 
 {tools}
 
-You are an autonomous Job Application Agent. Look at the CURRENT SCREEN DOM and the CURRENT VISUAL SUMMARY below. 
-Find the XPath for the inputs you need to fill, or the button you need to click to advance.
+You are an autonomous Job Application Agent. Your goal is to navigate the webpage, fill out the entire multi-page application form, and click Submit until the application is 100% completed.
+Look at the CURRENT SCREEN DOM and the CURRENT VISUAL SUMMARY below. 
+Find the XPath for the inputs you need to fill, or the button you need to click to advance to the next page of the application.
+
+CRITICAL INSTRUCTION: DO NOT output a 'Final Answer' unless you physically see a confirmation message on the screen that the application has been successfully submitted (e.g., "Application Complete", "Thank you for applying"). If there are more forms to fill or 'Next' buttons to click, you MUST output an Action.
 
 CURRENT SCREEN DOM:
 {current_dom}
@@ -289,7 +292,7 @@ Thought:{agent_scratchpad}'''
                 # Execute ONE step of the ReAct Agent
                 try:
                     response = agent.invoke({
-                        "input": "Look at the DOM and Visual Summary. Execute the next necessary action to progress the job application, or output Final Answer if submitted.",
+                        "input": "What is the next immediate action required to progress this job application? Output an Action if there is work to do. Output Final Answer ONLY IF the screen explicitly confirms the application is fully submitted.",
                         "current_dom": clean_dom,
                         "vision_summary": vision_summary,
                         "agent_scratchpad": agent_scratchpad,
