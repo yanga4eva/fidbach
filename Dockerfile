@@ -5,7 +5,8 @@ FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
-    TZ=UTC
+    TZ=UTC \
+    OLLAMA_MODELS=/workspace/ollama
 
 # Install system dependencies required for Chromium, Xvfb, VNC, OpenCV, Python, and Ollama
 RUN apt-get update && apt-get install -y --no-install-recommends \
