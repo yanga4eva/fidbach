@@ -4,6 +4,7 @@ import time
 
 from app.core.credential_logic import profile_manager
 from app.core.agentic_workflow import AGENT_STATE, launch_agent_thread
+from streamlit.runtime.scriptrunner import add_script_run_ctx
 
 st.set_page_config(page_title="ApplyGenie Dashboard", page_icon="🧞‍♂️", layout="wide")
 
@@ -64,6 +65,7 @@ with col1:
             
             # Start the agent in a background thread
             thread = threading.Thread(target=launch_agent_thread, args=(job_url,))
+            add_script_run_ctx(thread)
             thread.daemon = True
             thread.start()
             st.rerun()
