@@ -11,9 +11,18 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from app.core.credential_logic import profile_manager
 from app.core.vision_engine import VisionEngine
+from app.core.dom_parser import compress_dom
+import app.core.tools as agent_tools
+
 from fpdf import FPDF
 import tempfile
 import subprocess
+
+# LangChain Imports
+from langchain_community.llms import Ollama
+from langchain_core.tools import Tool
+from langchain.agents import AgentExecutor, create_react_agent
+from langchain.prompts import PromptTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +180,7 @@ class JobApplicationAgent:
         return value
 
     def run_application_flow(self, job_url: str):
-        """The main agent loop for searching, tailoring, and applying."""
+        """The main agent loop for searching, tailoring, and applying using LangChain ReAct."""
         try:
             if not self.driver:
                 self.initialize_browser()
@@ -180,65 +189,94 @@ class JobApplicationAgent:
             self.driver.get(job_url)
             time.sleep(3) # Wait for initial load
             
-            # Step 1: Scrape JD (simplified example)
-            # Example: element = self.driver.find_element(By.TAG_NAME, 'body')
-            # jd_text = element.text
-            # tailored_bullets = self.rewrite_resume(jd_text)
+            # --- 1. Set up LangChain LLM ---
+            llm = Ollama(model=self.r1_model, base_url=self.ollama_url)
             
-            # Step 1b: Generate the PDF based on the updated resume
-            update_state("Synthesizing Application", "Preparing documents for upload...")
-            # For demonstration, we'll pretend we just scraped this JD and generated the resume text
-            dummy_jd = "Looking for a seasoned software engineer with Docker experience."
-            tailored_text = self.rewrite_resume(dummy_jd)
-            pdf_path = self.generate_pdf_resume(tailored_text)
+            # --- 2. Define Tools ---
+            tools = [
+                Tool(
+                    name="Click_Element",
+                    func=lambda xpath: agent_tools.click_element(self.driver, xpath),
+                    description="Clicks an interactive element on the page. Input should be a valid XPath."
+                ),
+                Tool(
+                    name="Type_Text",
+                    func=lambda args: agent_tools.type_text(self.driver, text=args.split('|')[1], xpath=args.split('|')[0]),
+                    description="Types text into an input field. Input must be formatted exactly as 'xpath|text_to_type'."
+                ),
+                Tool(
+                    name="Get_Profile_Data",
+                    func=agent_tools.get_profile_data,
+                    description="Fetches user profile data to fill forms. Input should be exactly one of: name, email, phone, resume, password."
+                ),
+                Tool(
+                    name="Pause_For_Human",
+                    func=self.request_manual_intervention,
+                    description="Pauses the agent and asks the user for help (e.g., for CAPTCHAs, 2FA, or unknown screens). Input is the prompt/question to ask the user."
+                )
+            ]
             
-            # Step 2: Fill Account Creation (using master password)
-            update_state("Creating Account", "Filling account creation form and uploading resume...")
-            # Example: Locate email/password fields
-            # email_field = self.driver.find_element(By.NAME, 'email')
-            # email_field.send_keys(profile_manager.get_profile().get('email'))
-            # pwd_field = self.driver.find_element(By.NAME, 'password')
-            # pwd_field.send_keys(profile_manager.get_master_password())
+            # --- 3. Define ReAct Prompt ---
+            template = '''Answer the following questions as best you can. You have access to the following tools:
+
+{tools}
+
+You are an autonomous Job Application Agent. Your goal is to navigate the webpage, fill out the application form using the Get_Profile_Data tool, and click Submit.
+Look at the CURRENT SCREEN DOM below. Find the XPath for the inputs you need to fill, or the button you need to click to advance.
+
+CURRENT SCREEN DOM:
+{current_dom}
+
+Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+
+Begin!
+
+Question: {input}
+Thought:{agent_scratchpad}'''
+
+            prompt = PromptTemplate.from_template(template)
             
-            # Example: Locate File Upload field and send the PDF path
-            # if pdf_path:
-            #     upload_field = self.driver.find_element(By.CSS_SELECTOR, 'input[type="file"]')
-            #     upload_field.send_keys(pdf_path)
+            # --- 4. Initialize Agent ---
+            agent = create_react_agent(llm, tools, prompt)
+            agent_executor = AgentExecutor(
+                agent=agent, 
+                tools=tools, 
+                verbose=True,
+                handle_parsing_errors=True,
+                max_iterations=15 # Prevent infinite loops
+            )
             
-            # Step 3: Handle complex forms & 2FA
-            # Simulated check for a verification code specific to workdays/lever
-            page_source = self.driver.page_source.lower()
-            if "verification code" in page_source or "enter code" in page_source:
-                code = self.request_manual_intervention("A verification code was sent to your email. Please enter it here:")
-                update_state("Entering Code", f"Applying code: {code}")
-                # code_field = self.driver.find_element(By.NAME, 'verification_code')
-                # code_field.send_keys(code)
+            # --- 5. Custom Execution Loop ---
+            # We wrap the executor so we can continually feed it the freshest DOM
+            update_state("Agent Loop Started", "Analyzing the DOM and reasoning next steps...")
             
-            # Step 4: Vision QC before final submit
-            screenshot_file = "/tmp/presubmit.png"
-            self.driver.save_screenshot(screenshot_file)
+            # For this MVP, we give it a very broad instruction and let it run up to 15 iterations.
+            # In a full build, this would be a custom while loop, but AgentExecutor handles the 
+            # Thought -> Action -> Observation cycle natively. We just need to inject the DOM.
             
-            update_state("Vision QC", "Running DeepSeek-VL2 quality checks...")
-            missing_check = self.vision.check_for_missing_fields(screenshot_file)
-            dropdown_check = self.vision.check_dropdown_mapping(screenshot_file)
-            captcha_check = self.vision.detect_captcha(screenshot_file)
+            raw_html = self.driver.page_source
+            clean_dom = compress_dom(raw_html)
             
-            logger.info("Vision QC Results:")
-            logger.info(missing_check)
-            logger.info(dropdown_check)
-            logger.info(captcha_check)
+            response = agent_executor.invoke({
+                "input": "Look at the DOM. Find the apply button, or fill out the application form. Keep going until the application is submitted.",
+                "current_dom": clean_dom
+            })
             
-            if "CAPTCHA: YES" in captcha_check.get("raw_response", ""):
-                self.request_manual_intervention("CAPTCHA detected on screen! Please solve it via the VNC viewer (Port 8080) and type 'DONE' here.")
-                
-            update_state("Success", "QC Passed. Assuming Application Submitted.")
+            update_state("Agent Finished", f"Final Output: {response.get('output')}")
             
         except Exception as e:
             update_state("Failed", f"Agent crashed during application: {e}")
         finally:
             if self.driver:
-                # We optionally leave it open for VNC inspection, or close it.
-                # self.driver.quit()
                 pass
 
 def launch_agent_thread(job_url: str):
