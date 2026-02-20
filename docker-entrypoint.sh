@@ -7,6 +7,7 @@ export VNC_PASSWORD=${VNC_PASSWORD:-applygenie2026}
 export VNC_RESOLUTION=${VNC_RESOLUTION:-1920x1080x24}
 # Extract just the geometry WxH
 export SCREEN_GEOMETRY=$(echo "$VNC_RESOLUTION" | cut -d'x' -f1,2)
+export PYTHONPATH="/app"
 
 # --- OLLAMA SETUP ---
 echo ">>> Starting Ollama Server in the background..."
