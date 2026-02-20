@@ -58,7 +58,7 @@ FASTAPI_PID=$!
 
 echo ">>> Starting Streamlit UI (Foreground)..."
 # Start Streamlit on port 8501 headlessly so it doesn't block on the email telemetry prompt.
-streamlit run app/ui/dashboard.py --server.headless true
+streamlit run app/ui/Home.py --server.headless true
 
 # Keep script running if streamlit dies for some reason
 wait $XVFB_PID
