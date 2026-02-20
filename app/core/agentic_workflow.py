@@ -213,6 +213,21 @@ class JobApplicationAgent:
                     name="Pause_For_Human",
                     func=self.request_manual_intervention,
                     description="Pauses the agent and asks the user for help (e.g., for CAPTCHAs, 2FA, or unknown screens). Input is the prompt/question to ask the user."
+                ),
+                Tool(
+                    name="Scroll_Down",
+                    func=lambda _: agent_tools.scroll_down(self.driver),
+                    description="Scrolls down the page by one viewport height. Use this if you need to see more of a long form. Input should be 'down'."
+                ),
+                Tool(
+                    name="Scroll_Up",
+                    func=lambda _: agent_tools.scroll_up(self.driver),
+                    description="Scrolls up the page by one viewport height. Input should be 'up'."
+                ),
+                Tool(
+                    name="Go_Back",
+                    func=lambda _: agent_tools.go_back(self.driver),
+                    description="Clicks the browser's back button to navigate to the previous page. Input should be 'back'."
                 )
             ]
             
@@ -255,7 +270,7 @@ Thought:{agent_scratchpad}'''
             update_state("Agent Loop Started", "Analyzing the DOM and reasoning next steps...")
             
             agent_scratchpad = ""
-            max_iterations = 15
+            max_iterations = 50  # Increased for multi-page complex applications
             
             for i in range(max_iterations):
                 update_state(f"Step {i+1}/{max_iterations}", "Perceiving Screen (DOM + Vision)...")

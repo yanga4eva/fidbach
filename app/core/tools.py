@@ -73,3 +73,30 @@ def look_at_screen(driver: uc.Chrome, vision_engine: VisionEngine, question: str
             return f"Vision Error: {result['error']}"
     except Exception as e:
         return f"Failed to capture screen: {str(e)}"
+
+def scroll_down(driver: uc.Chrome) -> str:
+    """Scrolls down the page by one viewport height."""
+    try:
+        driver.execute_script("window.scrollBy(0, window.innerHeight);")
+        time.sleep(1)
+        return "Successfully scrolled down."
+    except Exception as e:
+        return f"Failed to scroll down: {str(e)}"
+
+def scroll_up(driver: uc.Chrome) -> str:
+    """Scrolls up the page by one viewport height."""
+    try:
+        driver.execute_script("window.scrollBy(0, -window.innerHeight);")
+        time.sleep(1)
+        return "Successfully scrolled up."
+    except Exception as e:
+        return f"Failed to scroll up: {str(e)}"
+
+def go_back(driver: uc.Chrome) -> str:
+    """Navigates back to the previous page in history."""
+    try:
+        driver.back()
+        time.sleep(2)
+        return "Successfully navigated back."
+    except Exception as e:
+        return f"Failed to navigate back: {str(e)}"
