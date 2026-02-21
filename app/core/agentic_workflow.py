@@ -8,6 +8,7 @@ import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import UnexpectedAlertPresentException, NoAlertPresentException
 
 from app.core.credential_logic import profile_manager
 from app.core.vision_engine import VisionEngine
@@ -280,9 +281,20 @@ Thought:{agent_scratchpad}'''
             for i in range(max_iterations):
                 update_state(f"Step {i+1}/{max_iterations}", "Perceiving Screen (DOM + Vision)...")
                 
-                # Retrieve Fresh DOM
-                raw_html = self.driver.page_source
-                clean_dom = compress_dom(raw_html)
+                # Retrieve Fresh DOM (with Alert handling)
+                try:
+                    raw_html = self.driver.page_source
+                    clean_dom = compress_dom(raw_html)
+                except UnexpectedAlertPresentException:
+                    alert = self.driver.switch_to.alert
+                    alert_text = alert.text
+                    update_state("Alert Detected", f"Handling unexpected JS alert: {alert_text}")
+                    alert.accept() # Dismiss the alert
+                    
+                    # Feed this back to the loop immediately
+                    agent_scratchpad += f"\nObservation: A JavaScript Alert popped up with message: '{alert_text}'. I just dismissed it. I need to fix this error before advancing.\nThought: "
+                    time.sleep(1)
+                    continue
                 
                 # Retrieve Fresh Vision
                 screenshot_path = "/tmp/agent_vision_loop.png"
