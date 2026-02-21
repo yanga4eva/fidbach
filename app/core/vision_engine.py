@@ -53,6 +53,7 @@ class VisionEngine:
     def detect_captcha(self, screenshot_path: str) -> dict:
         """
         Detects if a CAPTCHA is visible on the screen and requires manual intervention.
+        """
         prompt = (
             "Is there an active, unsolved CAPTCHA block explicitly visible on this screen right now? "
             "Look for 'I am not a robot. reCAPTCHA', or an image selection puzzle. "
