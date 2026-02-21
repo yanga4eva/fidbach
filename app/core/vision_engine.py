@@ -53,11 +53,11 @@ class VisionEngine:
     def detect_captcha(self, screenshot_path: str) -> dict:
         """
         Detects if a CAPTCHA is visible on the screen and requires manual intervention.
-        """
         prompt = (
-            "Is there a CAPTCHA (like reCAPTCHA or hCaptcha) visible on this screen? "
-            "Reply with 'CAPTCHA: YES' if one is present and needs solving, "
-            "otherwise reply 'CAPTCHA: NO'."
+            "Is there an active, unsolved CAPTCHA block explicitly visible on this screen right now? "
+            "Look for 'I am not a robot. reCAPTCHA', or an image selection puzzle. "
+            "Reply with 'CAPTCHA: YES' ONLY if you are absolutely certain one is visible and blocking progress. "
+            "Otherwise reply 'CAPTCHA: NO'."
         )
         return self._run_vision_prompt(screenshot_path, prompt)
 

@@ -1,30 +1,44 @@
 import re
 from bs4 import BeautifulSoup, Comment
 
+def get_xpath(element) -> str:
+    """Generates an absolute XPath for a given BeautifulSoup element."""
+    components = []
+    child = element if element.name else element.parent
+    for parent in child.parents:
+        siblings = parent.find_all(child.name, recursive=False)
+        components.append(
+            child.name if len(siblings) == 1 else '%s[%d]' % (
+                child.name,
+                next(i for i, s in enumerate(siblings, 1) if s is child)
+            )
+        )
+        child = parent
+    components.reverse()
+    return '/%s' % '/'.join(components)
+
 def compress_dom(html_source: str) -> str:
     """
     Takes raw HTML and compresses it into a clean, text-based representation
-    of only the interactive and meaningful elements (buttons, links, inputs, labels).
-    This prevents blowing out the LLM's context window.
+    of only the interactive and meaningful elements.
+    Crucially, it embeds the EXACT XPath for every element so the LLM doesn't guess.
     """
     soup = BeautifulSoup(html_source, 'html.parser')
     
-    # 1. Remove all script, style, meta, and svg tags
-    for tag in soup(["script", "style", "meta", "noscript", "svg", "path", "header", "footer"]):
+    # 1. Remove noise
+    for tag in soup(["script", "style", "meta", "noscript", "svg", "path", "nav", "footer", "iframe"]):
         tag.decompose()
         
-    # 2. Remove comments
     comments = soup.findAll(string=lambda text: isinstance(text, Comment))
     for comment in comments:
         comment.extract()
         
-    # 3. Target specifically interactive/important elements
-    interactive_tags = ['a', 'button', 'input', 'select', 'textarea', 'label', 'h1', 'h2', 'h3']
+    # 2. Target specifically interactive/important elements
+    interactive_tags = ['a', 'button', 'input', 'select', 'textarea', 'label']
     
     compressed_lines = []
     
     for element in soup.find_all(interactive_tags):
-        # Skip hidden elements
         style = element.get('style', '').lower()
         if 'display: none' in style or 'visibility: hidden' in style:
             continue
@@ -32,29 +46,23 @@ def compress_dom(html_source: str) -> str:
             continue
             
         el_type = element.name.upper()
+        exact_xpath = get_xpath(element)
         
-        # Build a representation like: [BUTTON id="submit-btn"] Submit Application [/BUTTON]
-        attrs_str = ""
+        attrs_str = f' xpath="{exact_xpath}"'
         
-        # We only care about id, name, type, and placeholder to give the agent targets
-        for attr in ['id', 'name', 'type', 'placeholder', 'aria-label', 'value']:
+        for attr in ['id', 'name', 'type', 'placeholder', 'value']:
             val = element.get(attr)
             if val:
-                # Keep it clean
                 val_str = str(val) if not isinstance(val, list) else " ".join(val)
                 attrs_str += f' {attr}="{val_str}"'
                 
         text_content = element.get_text(strip=True)
-        
-        # If it's an input with no text, it might just have a placeholder or value
         if not text_content and element.name == 'input':
             text_content = element.get('value', '')
             
-        # Only add elements that actually have some identifying text or attributes
-        if text_content or attrs_str:
+        if text_content or 'type' in attrs_str or 'placeholder' in attrs_str:
             line = f"<{el_type}{attrs_str}>{text_content}</{el_type}>"
             compressed_lines.append(line)
 
-    # 4. Join and deduplicate excessive newlines
     clean_dom = "\n".join(compressed_lines)
     return clean_dom

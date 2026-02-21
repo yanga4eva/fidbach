@@ -287,7 +287,7 @@ Thought:{agent_scratchpad}'''
                 # Retrieve Fresh Vision
                 screenshot_path = "/tmp/agent_vision_loop.png"
                 self.driver.save_screenshot(screenshot_path)
-                vision_req = "Describe this page. Are there any forms, buttons, CAPTCHAs, or error messages?"
+                vision_req = "Describe the interactive layout of this page objectively. List what forms, empty text inputs, or physical buttons are currently visible. Do not invent context."
                 vision_res = self.vision._run_vision_prompt(screenshot_path, vision_req)
                 vision_summary = vision_res.get('raw_response', 'Failed to get vision summary.')
                 
