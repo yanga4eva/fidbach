@@ -59,33 +59,58 @@ class CompanyCrawler:
         """
         logger.info(f"Initiating autonomous crawl for '{company_domain}' searching for '{target_keywords}'")
         jobs_added = 0
-        clean_domain = company_domain.replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
-        careers_url = None
+        
+        # Parse inputs
+        raw_input = company_domain.strip()
+        is_direct_url = raw_input.startswith("http") or ("/" in raw_input and " " not in raw_input)
+        
+        if is_direct_url:
+            if not raw_input.startswith("http"):
+                careers_url = f"https://{raw_input}"
+            else:
+                careers_url = raw_input
+            
+            clean_domain = urllib.parse.urlparse(careers_url).netloc.replace("www.", "")
+            company_name = clean_domain.split('.')[0]
+        else:
+            clean_domain = raw_input.replace("www.", "")
+            company_name = clean_domain.split('.')[0]
+            careers_url = None
         
         try:
-            # Step 1a: Direct Homepage Discovery
-            logger.info(f"Attempting direct homepage discovery on https://www.{clean_domain}")
-            self.driver.get(f"https://www.{clean_domain}")
-            time.sleep(4)
-            careers_url = self._find_careers_link_on_page(clean_domain)
-            
-            # Step 1b: Fallback to Google Dorking
-            if not careers_url:
-                logger.info("Direct link not found in DOM. Falling back to Google Search.")
-                search_query = f"site:{clean_domain} careers OR jobs"
-                encoded_query = urllib.parse.quote_plus(search_query)
-                self.driver.get(f"https://www.google.com/search?q={encoded_query}")
-                time.sleep(3)
+            if careers_url is None:
+                # Step 1a: Direct Homepage Discovery
+                logger.info(f"Attempting direct homepage discovery on https://www.{clean_domain}")
+                try:
+                    self.driver.get(f"https://www.{clean_domain}")
+                    time.sleep(4)
+                    careers_url = self._find_careers_link_on_page(clean_domain)
+                except Exception as e:
+                    logger.warning(f"Direct homepage access failed: {e}")
                 
-                soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                search_results = soup.find_all('a')
-                
-                for a in search_results:
-                    href = a.get('href', '')
-                    if href.startswith('http') and clean_domain in href and 'google.com' not in href:
-                        careers_url = href
-                        break
-                        
+                # Step 1b: Fallback to Google Dorking
+                if not careers_url:
+                    logger.info("Direct link not found in DOM. Falling back to Google Search.")
+                    search_query = f"site:{clean_domain} careers OR jobs"
+                    encoded_query = urllib.parse.quote_plus(search_query)
+                    self.driver.get(f"https://www.google.com/search?q={encoded_query}")
+                    time.sleep(3)
+                    
+                    soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                    search_results = soup.find_all('a')
+                    
+                    for a in search_results:
+                        href = a.get('href', '')
+                        if href.startswith('/url?q='):
+                            href = href.split('/url?q=')[1].split('&')[0]
+                            href = urllib.parse.unquote(href)
+                            
+                        # Heuristic: we want a link related to the company
+                        if href.startswith('http') and 'google.com' not in href:
+                            if company_name.lower() in href.lower() or clean_domain.lower() in href.lower():
+                                careers_url = href
+                                break
+                            
             if not careers_url:
                 logger.warning(f"Could not locate the Careers portal for {company_domain}")
                 return 0
@@ -119,12 +144,20 @@ class CompanyCrawler:
                         full_url = href
                         
                     # Queue it up. The platform fingerprint is appended to the company name for agent context.
-                    company_with_context = f"{company_domain} [{platform}]"
+                    company_with_context = f"{company_name.capitalize()} [{platform}]"
                     if add_job_to_queue(full_url, link.get_text(strip=True), company_with_context):
                         logger.info(f"Autonomously queued job: {full_url}")
                         jobs_added += 1
                         if jobs_added >= 15:
                             break
+            
+            # If nothing was found, but the user gave us a direct URL, queue that direct URL natively!
+            if jobs_added == 0 and is_direct_url:
+                company_with_context = f"{company_name.capitalize()} [{platform}]"
+                page_title = careers_soup.title.string.strip() if careers_soup.title and careers_soup.title.string else "Direct Job Link"
+                if add_job_to_queue(careers_url, page_title, company_with_context):
+                    logger.info(f"Autonomously queued the direct URL: {careers_url}")
+                    jobs_added += 1
                             
             return jobs_added
 

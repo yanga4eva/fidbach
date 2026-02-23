@@ -19,8 +19,10 @@ st.title("🧞‍♂️ ApplyGenie Autonomous Agent")
 st.markdown("Deploy job applications on autopilot using DeepSeek-R1, DeepSeek-VL2, and Xvfb/noVNC.")
 
 def init_scraper_driver():
+    import os
     options = uc.ChromeOptions()
-    options.add_argument("--headless=new")
+    options.add_argument(f"--display={os.environ.get('DISPLAY', ':99')}")
+    options.add_argument("--window-size=1920,1080")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-gpu")
     return uc.Chrome(options=options, version_main=145)
