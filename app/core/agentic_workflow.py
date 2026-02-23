@@ -264,6 +264,8 @@ Find the numeric ID for the inputs you need to fill, or the button you need to c
 
 CRITICAL INSTRUCTION: You MUST ONLY interact with elements that have a numeric ID listed in the Interactive Elements map below. DO NOT guess or hallucinate IDs. 
 
+AUTH INSTRUCTION: If you are presented with a Login screen for an ATS portal you do not recognize, you MUST find the "Create Account" or "Register" button and click it to start a new account flow. Use the `Get_Profile_Data(email)` and `Get_Profile_Data(password)` tools to fill in the registration details securely. Do not attempt to guess existing logins.
+
 CRITICAL END-STATE INSTRUCTION: DO NOT output a 'Final Answer' unless you physically see a confirmation message on the screen that the application has been successfully submitted (e.g., "Application Complete", "Thank you for applying"). If there are more forms to fill or 'Next' buttons to click, you MUST output an Action.
 
 CURRENT INTERACTIVE ELEMENTS:

@@ -10,13 +10,15 @@ function injectSetOfMarks() {
     const oldMarks = document.querySelectorAll('.applygenie-som-mark');
     oldMarks.forEach(el => el.remove());
 
-    // Basic logic mapping for what is "interactive" visually
+    // Basic logic mapping for what is "interactive" visually, plus Z-Index occlusion depth
     const interactables = Array.from(document.querySelectorAll(
         "button, a, input, select, textarea, [role='button'], [role='link']"
     )).filter(el => {
         const style = window.getComputedStyle(el);
         const rect = el.getBoundingClientRect();
-        return (
+        
+        // 1. Basic CSS Visibility check
+        const isVisible = (
             style.display !== 'none' &&
             style.visibility !== 'hidden' &&
             style.opacity !== '0' &&
@@ -27,6 +29,22 @@ function injectSetOfMarks() {
             rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
             rect.right <= (window.innerWidth || document.documentElement.clientWidth)
         );
+        
+        if (!isVisible) return false;
+        
+        // 2. Z-Index Occlusion Check
+        // Calculate the physical center of the element
+        const cX = rect.left + (rect.width / 2);
+        const cY = rect.top + (rect.height / 2);
+        
+        // Ask the browser what element is physically on top at that exact center pixel
+        const topEl = document.elementFromPoint(cX, cY);
+        
+        if (!topEl) return false;
+        
+        // If the topmost element is this element, or a child of this element (like an icon inside a button),
+        // or if this element is a parent of the topmost (like a wrapper <a> around an <img>), it's truly visible.
+        return el.contains(topEl) || topEl.contains(el);
     });
 
     // We store the mapping directly on the window object so Python can pull it back via execute_script
@@ -117,7 +135,8 @@ def trigger_click_by_id(driver: uc.Chrome, som_map: dict, element_id: str) -> st
             )).filter(el => {{
                 const style = window.getComputedStyle(el);
                 const rect = el.getBoundingClientRect();
-                return (
+                
+                const isVisible = (
                     style.display !== 'none' &&
                     style.visibility !== 'hidden' &&
                     style.opacity !== '0' &&
@@ -128,6 +147,15 @@ def trigger_click_by_id(driver: uc.Chrome, som_map: dict, element_id: str) -> st
                     rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
                     rect.right <= (window.innerWidth || document.documentElement.clientWidth)
                 );
+                
+                if (!isVisible) return false;
+                
+                const cX = rect.left + (rect.width / 2);
+                const cY = rect.top + (rect.height / 2);
+                const topEl = document.elementFromPoint(cX, cY);
+                if (!topEl) return false;
+                
+                return el.contains(topEl) || topEl.contains(el);
             }});
             
             // Re-find the exact element node in the live DOM
@@ -165,12 +193,27 @@ def trigger_type_by_id(driver: uc.Chrome, som_map: dict, element_id: str, text: 
             )).filter(el => {{
                 const style = window.getComputedStyle(el);
                 const rect = el.getBoundingClientRect();
-                return (
+                
+                const isVisible = (
                     style.display !== 'none' &&
                     style.visibility !== 'hidden' &&
-                // ... same robust filters
-                    rect.width > 5
+                    style.opacity !== '0' &&
+                    rect.width > 5 &&
+                    rect.height > 5 &&
+                    rect.top >= 0 &&
+                    rect.left >= 0 &&
+                    rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+                    rect.right <= (window.innerWidth || document.documentElement.clientWidth)
                 );
+                
+                if (!isVisible) return false;
+                
+                const cX = rect.left + (rect.width / 2);
+                const cY = rect.top + (rect.height / 2);
+                const topEl = document.elementFromPoint(cX, cY);
+                if (!topEl) return false;
+                
+                return el.contains(topEl) || topEl.contains(el);
             }});
             
             const targetEl = interactables[{eid}];

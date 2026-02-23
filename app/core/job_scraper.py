@@ -11,95 +11,91 @@ from app.core.db import add_job_to_queue
 
 logger = logging.getLogger(__name__)
 
-class JobScraper:
+class CompanyCrawler:
+    """
+    Phase 6 Autonomous Universal Scraper:
+    Instead of relying on structured job boards, this agent takes a raw company domain,
+    finds their specific ATS (Greenhouse/Workday/etc) portal via search, navigates down 
+    the funnel, and queues the raw job links.
+    """
     def __init__(self, driver: uc.Chrome):
         self.driver = driver
 
-    def scrape_linkedin_jobs(self, keywords: str, location: str, max_jobs: int = 15) -> int:
+    def find_and_queue_jobs(self, company_domain: str, target_keywords: str) -> int:
         """
-        Scrapes job URLs from LinkedIn's public job board without logging in.
-        Returns the number of jobs successfully added to the queue.
+        1. Uses Google to find the official careers page for the given domain.
+        2. Navigates to the careers page.
+        3. Attempts to find links matching the target keywords.
+        4. Queues them in the DB.
         """
-        logger.info(f"Starting LinkedIn scrape for '{keywords}' in '{location}'")
+        logger.info(f"Initiating autonomous crawl for '{company_domain}' searching for '{target_keywords}'")
         jobs_added = 0
         
         try:
-            # Build the public search URL
-            query = urllib.parse.quote_plus(keywords)
-            loc = urllib.parse.quote_plus(location)
-            url = f"https://www.linkedin.com/jobs/search?keywords={query}&location={loc}&f_TPR=r86400" # Past 24 hours
+            # Step 1: Find the Careers Page via Dorking
+            clean_domain = company_domain.replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
+            search_query = f"site:{clean_domain} careers OR jobs"
+            encoded_query = urllib.parse.quote_plus(search_query)
             
-            self.driver.get(url)
-            time.sleep(5) # Wait for initial load
+            self.driver.get(f"https://www.google.com/search?q={encoded_query}")
+            time.sleep(3) # Wait for Google
             
-            # Scroll to load dynamic content
+            # Find the first valid search result link
+            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            search_results = soup.find_all('a')
+            
+            careers_url = None
+            for a in search_results:
+                href = a.get('href', '')
+                # Filter out Google's own links and look for the target domain
+                if href.startswith('http') and clean_domain in href and 'google.com' not in href:
+                    careers_url = href
+                    break
+                    
+            if not careers_url:
+                logger.warning(f"Could not automatically locate the Careers portal for {company_domain}")
+                return 0
+                
+            logger.info(f"Located Careers Portal: {careers_url}. Navigating...")
+            
+            # Step 2: Navigate to the actual ATS/Careers page
+            self.driver.get(careers_url)
+            time.sleep(5) # Give heavy client-side React apps time to hydrate
+            
+            # Scroll to trigger lazy loading
             for _ in range(3):
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(2)
                 
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            # Step 3: Parse the custom job feed
+            careers_soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            all_links = careers_soup.find_all('a')
             
-            # Find all job cards
-            job_cards = soup.find_all('div', class_='base-card')
+            keyword_list = [k.strip().lower() for k in target_keywords.split(',')]
             
-            for card in job_cards:
-                if jobs_added >= max_jobs:
-                    break
-                    
-                title_elem = card.find('h3', class_='base-search-card__title')
-                company_elem = card.find('h4', class_='base-search-card__subtitle')
-                link_elem = card.find('a', class_='base-card__full-link')
+            for link in all_links:
+                href = link.get('href', '')
+                text = link.get_text(strip=True).lower()
                 
-                if title_elem and company_elem and link_elem:
-                    title = title_elem.get_text(strip=True)
-                    company = company_elem.get_text(strip=True)
-                    # Clean tracking parameters from URL
-                    job_url = link_elem['href'].split('?')[0]
+                # Highly basic heuristic for identifying a job listing link
+                if href and len(text) > 5 and any(kw in text for kw in keyword_list):
                     
-                    if add_job_to_queue(job_url, title, company):
-                        logger.info(f"Queued: {title} at {company}")
-                        jobs_added += 1
+                    # Normalize relative URLs
+                    if href.startswith('/'):
+                        base_url = "/".join(careers_url.split('/')[:3]) # e.g. https://jobs.netflix.com
+                        full_url = base_url + href
+                    else:
+                        full_url = href
                         
-            return jobs_added
-            
-        except Exception as e:
-            logger.error(f"Error scraping LinkedIn: {e}")
-            return jobs_added
-
-    def scrape_google_jobs(self, keywords: str, max_jobs: int = 15) -> int:
-        """
-        Scrapes job URLs from Google Jobs.
-        """
-        logger.info(f"Starting Google Jobs scrape for '{keywords}'")
-        jobs_added = 0
-        
-        try:
-            query = urllib.parse.quote_plus(f"{keywords} jobs")
-            url = f"https://www.google.com/search?q={query}&ibp=htl;jobs"
-            
-            self.driver.get(url)
-            time.sleep(5)
-            
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            
-            # Google Jobs layout changes frequently, this is a basic heuristic
-            # looking for standard structural classes
-            job_items = soup.find_all('li')
-            
-            for item in job_items:
-                if jobs_added >= max_jobs:
-                    break
-                    
-                # Very basic extraction logic for Google's obfuscated DOM
-                link_elem = item.find('a')
-                if link_elem and 'href' in link_elem.attrs:
-                    job_url = link_elem['href']
-                    if 'google.com/search' not in job_url and job_url.startswith('http'):
-                        if add_job_to_queue(job_url, f"Google Search Result {jobs_added+1}", "Unknown Company"):
-                            jobs_added += 1
+                    # Queue it up
+                    if add_job_to_queue(full_url, link.get_text(strip=True), company_domain):
+                        logger.info(f"Autonomously queued job: {full_url}")
+                        jobs_added += 1
+                        if jobs_added >= 15: # Safety limit per company
+                            break
                             
             return jobs_added
-            
+
         except Exception as e:
-            logger.error(f"Error scraping Google Jobs: {e}")
+            logger.error(f"Critical error during autonomous crawl of {company_domain}: {e}")
             return jobs_added

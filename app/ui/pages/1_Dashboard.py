@@ -5,7 +5,7 @@ import time
 from app.core.credential_logic import profile_manager
 from app.core.agentic_workflow import AGENT_STATE, launch_agent_thread
 from app.core.db import get_all_jobs, init_db
-from app.core.job_scraper import JobScraper
+from app.core.job_scraper import CompanyCrawler
 import undetected_chromedriver as uc
 from streamlit.runtime.scriptrunner import add_script_run_ctx
 import pandas as pd
@@ -73,28 +73,33 @@ with col1:
     tab1, tab2, tab3 = st.tabs(["🎯 Scrape Jobs", "📋 Live Queue", "🤖 Agent Terminal"])
     
     with tab1:
-        st.subheader("Fill the Queue")
-        search_query = st.text_input("Job Title / Keywords", placeholder="Lead AI Engineer")
-        location = st.text_input("Location", placeholder="Remote US")
+        st.subheader("Fill the Queue (Universal Scraper)")
         
-        board = st.selectbox("Job Board", ["LinkedIn", "Google Jobs"])
+        st.markdown("Enter domains and keywords. The agent will find their Careers page, search, and queue the exact application links.")
+        domains_input = st.text_input("Target Company Domains (Comma separated)", placeholder="netflix.com, anthropic.com")
+        search_query = st.text_input("Target Job Keywords", placeholder="Lead AI Engineer, Machine Learning")
         
-        if st.button("🔍 Scrape & Add to Queue", type="primary"):
-            with st.spinner("Scraping jobs in the background..."):
-                try:
-                    driver = init_scraper_driver()
-                    scraper = JobScraper(driver)
-                    jobs_found = 0
-                    
-                    if board == "LinkedIn":
-                        jobs_found = scraper.scrape_linkedin_jobs(search_query, location)
-                    else:
-                        jobs_found = scraper.scrape_google_jobs(search_query)
+        if st.button("🔍 Autonomously Find & Queue Jobs", type="primary"):
+            if not domains_input or not search_query:
+                st.error("Please provide both target domains and keywords.")
+            else:
+                with st.spinner("Initializing autonomous crawler..."):
+                    try:
+                        driver = init_scraper_driver()
+                        scraper = CompanyCrawler(driver)
                         
-                    driver.quit()
-                    st.success(f"Added {jobs_found} specific '{search_query}' jobs to the PENDING queue!")
-                except Exception as e:
-                    st.error(f"Scrape failed: {e}")
+                        total_jobs = 0
+                        domains = [d.strip() for d in domains_input.split(',')]
+                        
+                        for domain in domains:
+                            st.toast(f"Crawling {domain}...")
+                            found = scraper.find_and_queue_jobs(domain, search_query)
+                            total_jobs += found
+                            
+                        driver.quit()
+                        st.success(f"Crawler finished! Added {total_jobs} total jobs to the PENDING queue.")
+                    except Exception as e:
+                        st.error(f"Crawl failed: {e}")
 
     with tab2:
         st.subheader("Database Job Queue")
