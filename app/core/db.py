@@ -69,7 +69,7 @@ def get_next_pending_job() -> Optional[Dict]:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        cursor.execute(\"SELECT * FROM job_queue WHERE status = 'PENDING' ORDER BY created_at ASC LIMIT 1\")
+        cursor.execute("SELECT * FROM job_queue WHERE status = 'PENDING' ORDER BY created_at ASC LIMIT 1")
         job = cursor.fetchone()
         
         if job:
