@@ -4,13 +4,16 @@ import time
 
 from app.core.credential_logic import profile_manager
 from app.core.agentic_workflow import AGENT_STATE, launch_agent_thread
-from app.core.db import get_all_jobs
+from app.core.db import get_all_jobs, init_db
 from app.core.job_scraper import JobScraper
 import undetected_chromedriver as uc
 from streamlit.runtime.scriptrunner import add_script_run_ctx
 import pandas as pd
 
 st.set_page_config(page_title="ApplyGenie Dashboard", page_icon="🧞‍♂️", layout="wide")
+
+# Ensure the database and tables exist
+init_db()
 
 st.title("🧞‍♂️ ApplyGenie Autonomous Agent")
 st.markdown("Deploy job applications on autopilot using DeepSeek-R1, DeepSeek-VL2, and Xvfb/noVNC.")
