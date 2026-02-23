@@ -194,6 +194,20 @@ class JobApplicationAgent:
             self.driver.get(job_url)
             time.sleep(3) # Wait for initial load
             
+            # --- 0. Pre-Flight Checks (Dismiss Login Walls) ---
+            update_state("Pre-flight", "Checking for intrusive login walls...")
+            try:
+                # LinkedIn often throws a "Sign in" modal that blocks the entire screen.
+                # The close button usually has an aria-label="Dismiss"
+                dismiss_btn = self.driver.find_element(By.CSS_SELECTOR, "button[aria-label='Dismiss']")
+                if dismiss_btn:
+                    # Use javascript to click it in case another element is slightly overlapping
+                    self.driver.execute_script("arguments[0].click();", dismiss_btn)
+                    update_state("Login Wall Dismissed", "Successfully closed the LinkedIn sign-in modal.")
+                    time.sleep(1)
+            except Exception:
+                pass # Modal not found, safe to proceed
+            
             # --- 1. Set up LangChain LLM ---
             llm = Ollama(model=self.r1_model, base_url=self.ollama_url)
             
