@@ -12,9 +12,9 @@ from selenium.common.exceptions import UnexpectedAlertPresentException, NoAlertP
 
 from app.core.credential_logic import profile_manager
 from app.core.vision_engine import VisionEngine
-from app.core.dom_parser import compress_dom
 from app.core.db import get_next_pending_job, update_job_status
 import app.core.tools as agent_tools
+from app.core.som_injector import inject_and_get_map, trigger_click_by_id, trigger_type_by_id
 
 from fpdf import FPDF
 import tempfile
@@ -212,16 +212,19 @@ class JobApplicationAgent:
             llm = Ollama(model=self.r1_model, base_url=self.ollama_url)
             
             # --- 2. Define Tools ---
+            # We use a mutable state wrapper to pass the most recent SOM map into the tools
+            current_state = {"som_map": {}}
+            
             tools = [
                 Tool(
-                    name="Click_Element",
-                    func=lambda xpath: agent_tools.click_element(self.driver, xpath),
-                    description="Clicks an interactive element on the page. Input should be a valid XPath."
+                    name="Click_Element_By_ID",
+                    func=lambda node_id: trigger_click_by_id(self.driver, current_state["som_map"], node_id.strip()),
+                    description="Clicks an interactive element. Input MUST be just the numeric ID (e.g., '42')."
                 ),
                 Tool(
-                    name="Type_Text",
-                    func=lambda args: agent_tools.type_text(self.driver, text=args.split('|')[1], xpath=args.split('|')[0]),
-                    description="Types text into an input field. Input must be formatted exactly as 'xpath|text_to_type'."
+                    name="Type_Text_By_ID",
+                    func=lambda args: trigger_type_by_id(self.driver, current_state["som_map"], args.split('|')[0].strip(), args.split('|')[1]),
+                    description="Types text into an input field. Input must be formatted exactly as 'id|text_to_type' (e.g., '12|John')."
                 ),
                 Tool(
                     name="Get_Profile_Data",
@@ -256,15 +259,15 @@ class JobApplicationAgent:
 {tools}
 
 You are an autonomous Job Application Agent. Your goal is to navigate the webpage, fill out the entire multi-page application form, and click Submit until the application is 100% completed.
-Look at the CURRENT SCREEN DOM and the CURRENT VISUAL SUMMARY below. 
-Find the XPath for the inputs you need to fill, or the button you need to click to advance to the next page of the application.
+Look at the CURRENT INTERACTIVE ELEMENTS map and the CURRENT VISUAL SUMMARY below. 
+Find the numeric ID for the inputs you need to fill, or the button you need to click to advance to the next page of the application.
 
-CRITICAL ANTI-HALLUCINATION INSTRUCTION: You MUST ONLY interact with elements that are explicitly listed in the CURRENT SCREEN DOM. DO NOT guess, fabricate, or hallucinate XPaths based on what you *think* should be there. Always extract the exact xpath string from the DOM provided.
+CRITICAL INSTRUCTION: You MUST ONLY interact with elements that have a numeric ID listed in the Interactive Elements map below. DO NOT guess or hallucinate IDs. 
 
 CRITICAL END-STATE INSTRUCTION: DO NOT output a 'Final Answer' unless you physically see a confirmation message on the screen that the application has been successfully submitted (e.g., "Application Complete", "Thank you for applying"). If there are more forms to fill or 'Next' buttons to click, you MUST output an Action.
 
-CURRENT SCREEN DOM:
-{current_dom}
+CURRENT INTERACTIVE ELEMENTS:
+{interactive_elements}
 
 CURRENT VISUAL SUMMARY (From LLaVA):
 {vision_summary}
@@ -299,10 +302,10 @@ Thought:{agent_scratchpad}'''
             for i in range(max_iterations):
                 update_state(f"Step {i+1}/{max_iterations}", "Perceiving Screen (DOM + Vision)...")
                 
-                # Retrieve Fresh DOM (with Alert handling)
+                # Handle Alerts before proceeding
                 try:
-                    raw_html = self.driver.page_source
-                    clean_dom = compress_dom(raw_html)
+                    # Just touching driver.title forces an alert check
+                    _ = self.driver.title 
                 except UnexpectedAlertPresentException:
                     alert = self.driver.switch_to.alert
                     alert_text = alert.text
@@ -314,10 +317,25 @@ Thought:{agent_scratchpad}'''
                     time.sleep(1)
                     continue
                 
-                # Retrieve Fresh Vision
+                # Retrieve Set-Of-Mark IDs and Draw Visual Boxes
+                raw_som_map = inject_and_get_map(self.driver)
+                current_state["som_map"] = raw_som_map
+                
+                # Convert the raw JSON map into an ultra-compressed string for the LLM context
+                compact_elements = []
+                for node_id, data in raw_som_map.items():
+                    tag = data.get('tagName', 'UNKNOWN')
+                    text = data.get('text', '').replace('\\n', ' ')[:50]
+                    aria = data.get('ariaLabel', '')[:50]
+                    compact_elements.append(f"[{node_id}] {tag} | Text: '{text}' | Aria: '{aria}'")
+                elements_string = "\\n".join(compact_elements)
+                if not elements_string:
+                    elements_string = "No interactive elements found."
+                
+                # Retrieve Fresh Vision (Screenshot now includes the red SOM bounding boxes!)
                 screenshot_path = "/tmp/agent_vision_loop.png"
                 self.driver.save_screenshot(screenshot_path)
-                vision_req = "Describe the interactive layout of this page objectively. List what forms, empty text inputs, or physical buttons are currently visible. Do not invent context."
+                vision_req = "Describe the interactive layout of this page. You see red bounding boxes with numbers inside them. What form fields or buttons are visible, and what are their numeric IDs? Be concise."
                 vision_res = self.vision._run_vision_prompt(screenshot_path, vision_req)
                 vision_summary = vision_res.get('raw_response', 'Failed to get vision summary.')
                 
@@ -325,7 +343,7 @@ Thought:{agent_scratchpad}'''
                 try:
                     response = agent.invoke({
                         "input": "What is the next immediate action required to progress this job application? Output an Action if there is work to do. Output Final Answer ONLY IF the screen explicitly confirms the application is fully submitted.",
-                        "current_dom": clean_dom,
+                        "interactive_elements": elements_string,
                         "vision_summary": vision_summary,
                         "agent_scratchpad": agent_scratchpad,
                         "intermediate_steps": [] # Required by LangChain internals
