@@ -88,18 +88,17 @@ class CompanyCrawler:
                 except Exception as e:
                     logger.warning(f"Direct homepage access failed: {e}")
                 
-                # Step 1b: Fallback to Google Dorking
+                # Step 1b: Strict Google Dorking
                 if not careers_url:
-                    logger.info("Direct link not found in DOM. Falling back to Google Search.")
+                    logger.info("Direct link not found in DOM. Falling back to Strict Google Search.")
                     search_query = f"site:{clean_domain} careers OR jobs"
                     encoded_query = urllib.parse.quote_plus(search_query)
                     self.driver.get(f"https://www.google.com/search?q={encoded_query}")
                     time.sleep(3)
                     
                     soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                    search_results = soup.find_all('a')
                     
-                    for a in search_results:
+                    for a in soup.find_all('a'):
                         href = a.get('href', '')
                         if href.startswith('/url?q='):
                             href = href.split('/url?q=')[1].split('&')[0]
@@ -110,6 +109,28 @@ class CompanyCrawler:
                             if company_name.lower() in href.lower() or clean_domain.lower() in href.lower():
                                 careers_url = href
                                 break
+                
+                # Step 1c: Broad Google Dorking (For isolated ATS domains like jobs.cvshealth.com)
+                if not careers_url:
+                    logger.info(f"Strict search failed for {company_name}. Falling back to Broad Google Search.")
+                    search_query = f"{company_name} careers"
+                    encoded_query = urllib.parse.quote_plus(search_query)
+                    self.driver.get(f"https://www.google.com/search?q={encoded_query}")
+                    time.sleep(3)
+                    
+                    soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                    bad_domains = ['google.com', 'linkedin.com', 'glassdoor.com', 'indeed.com', 'builtin.com', 'comparably.com', 'salary.com', 'ziprecruiter.com', 'simplyhired.com']
+                    
+                    for a in soup.find_all('a'):
+                        href = a.get('href', '')
+                        if href.startswith('/url?q='):
+                            href = href.split('/url?q=')[1].split('&')[0]
+                            href = urllib.parse.unquote(href)
+                            
+                        if href.startswith('http') and not any(bad in href.lower() for bad in bad_domains):
+                            # The first organic link that isn't an aggregator provider is highly likely their true ATS
+                            careers_url = href
+                            break
                             
             if not careers_url:
                 logger.warning(f"Could not locate the Careers portal for {company_domain}")
