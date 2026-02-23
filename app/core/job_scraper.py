@@ -13,56 +13,90 @@ logger = logging.getLogger(__name__)
 
 class CompanyCrawler:
     """
-    Phase 6 Autonomous Universal Scraper:
-    Instead of relying on structured job boards, this agent takes a raw company domain,
-    finds their specific ATS (Greenhouse/Workday/etc) portal via search, navigates down 
-    the funnel, and queues the raw job links.
+    Phase 7 Autonomous Universal Scraper:
+    Navigates to a company homepage, finds the Careers portal, identifies the ATS, 
+    and queues job links for the main ReAct worker.
     """
     def __init__(self, driver: uc.Chrome):
         self.driver = driver
 
+    def ats_fingerprint(self, url: str) -> str:
+        """Analyzes the URL to determine the ATS platform."""
+        url_lower = url.lower()
+        if 'workday' in url_lower or 'myworkdayjobs' in url_lower:
+            return 'Workday'
+        elif 'greenhouse.io' in url_lower:
+            return 'Greenhouse'
+        elif 'lever.co' in url_lower:
+            return 'Lever'
+        elif 'icims.com' in url_lower:
+            return 'iCIMS'
+        elif 'ashbyhq' in url_lower:
+            return 'Ashby'
+        return 'Unknown ATS'
+
+    def _find_careers_link_on_page(self, domain: str) -> str | None:
+        """Scans the current page DOM for common Career page links."""
+        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+        target_texts = ['careers', 'jobs', 'join us', 'work with us', 'openings']
+        
+        for a in soup.find_all('a', href=True):
+            text = a.get_text(strip=True).lower()
+            if any(t in text for t in target_texts):
+                href = a['href']
+                if href.startswith('/'):
+                    return f"https://www.{domain}{href}"
+                elif 'http' in href:
+                    return href
+        return None
+
     def find_and_queue_jobs(self, company_domain: str, target_keywords: str) -> int:
         """
-        1. Uses Google to find the official careers page for the given domain.
-        2. Navigates to the careers page.
+        1. Navigates to the homepage or Uses Google to find the careers page.
+        2. Deep Link Detection: Fingerprints the ATS.
         3. Attempts to find links matching the target keywords.
         4. Queues them in the DB.
         """
         logger.info(f"Initiating autonomous crawl for '{company_domain}' searching for '{target_keywords}'")
         jobs_added = 0
+        clean_domain = company_domain.replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
+        careers_url = None
         
         try:
-            # Step 1: Find the Careers Page via Dorking
-            clean_domain = company_domain.replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
-            search_query = f"site:{clean_domain} careers OR jobs"
-            encoded_query = urllib.parse.quote_plus(search_query)
+            # Step 1a: Direct Homepage Discovery
+            logger.info(f"Attempting direct homepage discovery on https://www.{clean_domain}")
+            self.driver.get(f"https://www.{clean_domain}")
+            time.sleep(4)
+            careers_url = self._find_careers_link_on_page(clean_domain)
             
-            self.driver.get(f"https://www.google.com/search?q={encoded_query}")
-            time.sleep(3) # Wait for Google
-            
-            # Find the first valid search result link
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            search_results = soup.find_all('a')
-            
-            careers_url = None
-            for a in search_results:
-                href = a.get('href', '')
-                # Filter out Google's own links and look for the target domain
-                if href.startswith('http') and clean_domain in href and 'google.com' not in href:
-                    careers_url = href
-                    break
-                    
+            # Step 1b: Fallback to Google Dorking
             if not careers_url:
-                logger.warning(f"Could not automatically locate the Careers portal for {company_domain}")
+                logger.info("Direct link not found in DOM. Falling back to Google Search.")
+                search_query = f"site:{clean_domain} careers OR jobs"
+                encoded_query = urllib.parse.quote_plus(search_query)
+                self.driver.get(f"https://www.google.com/search?q={encoded_query}")
+                time.sleep(3)
+                
+                soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+                search_results = soup.find_all('a')
+                
+                for a in search_results:
+                    href = a.get('href', '')
+                    if href.startswith('http') and clean_domain in href and 'google.com' not in href:
+                        careers_url = href
+                        break
+                        
+            if not careers_url:
+                logger.warning(f"Could not locate the Careers portal for {company_domain}")
                 return 0
                 
-            logger.info(f"Located Careers Portal: {careers_url}. Navigating...")
+            # Step 2: Navigate and ATS Fingerprint
+            platform = self.ats_fingerprint(careers_url)
+            logger.info(f"Located Careers Portal: {careers_url}. Detected Platform: {platform}")
             
-            # Step 2: Navigate to the actual ATS/Careers page
             self.driver.get(careers_url)
-            time.sleep(5) # Give heavy client-side React apps time to hydrate
+            time.sleep(5) # Hydration time
             
-            # Scroll to trigger lazy loading
             for _ in range(3):
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(2)
@@ -77,21 +111,19 @@ class CompanyCrawler:
                 href = link.get('href', '')
                 text = link.get_text(strip=True).lower()
                 
-                # Highly basic heuristic for identifying a job listing link
                 if href and len(text) > 5 and any(kw in text for kw in keyword_list):
-                    
-                    # Normalize relative URLs
                     if href.startswith('/'):
-                        base_url = "/".join(careers_url.split('/')[:3]) # e.g. https://jobs.netflix.com
+                        base_url = "/".join(careers_url.split('/')[:3])
                         full_url = base_url + href
                     else:
                         full_url = href
                         
-                    # Queue it up
-                    if add_job_to_queue(full_url, link.get_text(strip=True), company_domain):
+                    # Queue it up. The platform fingerprint is appended to the company name for agent context.
+                    company_with_context = f"{company_domain} [{platform}]"
+                    if add_job_to_queue(full_url, link.get_text(strip=True), company_with_context):
                         logger.info(f"Autonomously queued job: {full_url}")
                         jobs_added += 1
-                        if jobs_added >= 15: # Safety limit per company
+                        if jobs_added >= 15:
                             break
                             
             return jobs_added

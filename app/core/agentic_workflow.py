@@ -14,7 +14,7 @@ from app.core.credential_logic import profile_manager
 from app.core.vision_engine import VisionEngine
 from app.core.db import get_next_pending_job, update_job_status
 import app.core.tools as agent_tools
-from app.core.som_injector import inject_and_get_map, trigger_click_by_id, trigger_type_by_id
+from app.core.som_injector import inject_and_get_map, trigger_click_by_id, trigger_type_by_id, trigger_upload_by_id
 
 from fpdf import FPDF
 import tempfile
@@ -114,6 +114,40 @@ class JobApplicationAgent:
             update_state("Error", f"Failed to rewrite resume: {e}")
             return resume_text
             
+    def infer_answer_from_resume(self, question: str) -> str:
+        """
+        Uses DeepSeek-R1 internally to deduce the answer to a specific HR question
+        (e.g., 'Years of Python experience?') based on the user's resume.
+        """
+        update_state("Inferring Answer", f"Checking resume for: {question}")
+        profile = profile_manager.get_profile()
+        resume_text = profile.get("resume", "User has extensive software engineering experience.")
+        
+        prompt = (
+            f"You are an expert HR assistant. Based on the following User Resume, answer the specific question.\n"
+            f"Question: {question}\n\n"
+            f"Resume:\n{resume_text}\n\n"
+            f"Return ONLY the concise text/number answer. Do not include your reasoning or `<think>` blocks in the final output string if you can strip them, just the plain answer."
+        )
+        
+        payload = {
+            "model": self.r1_model,
+            "prompt": prompt,
+            "stream": False
+        }
+        
+        try:
+            response = requests.post(f"{self.ollama_url}/api/generate", json=payload)
+            response.raise_for_status()
+            answer = response.json().get('response', '')
+            # Try to strip out <think> tags if they exist in the raw text
+            import re
+            answer = re.sub(r'<think>.*?</think>', '', answer, flags=re.DOTALL).strip()
+            return answer
+        except Exception as e:
+            logger.error(f"Failed to infer answer: {e}")
+            return "Unable to determine from resume."
+
     def generate_pdf_resume(self, tailored_text: str) -> str | None:
         """
         Creates a PDF file from the tailored resume text.
@@ -227,9 +261,19 @@ class JobApplicationAgent:
                     description="Types text into an input field. Input must be formatted exactly as 'id|text_to_type' (e.g., '12|John')."
                 ),
                 Tool(
+                    name="Upload_File_By_ID",
+                    func=lambda args: trigger_upload_by_id(self.driver, current_state["som_map"], args.split('|')[0].strip(), args.split('|')[1]),
+                    description="Uploads a file to an <input type='file'> element natively. Input must be formatted exactly as 'id|file_path' (e.g., '12|/tmp/resume.pdf')."
+                ),
+                Tool(
                     name="Get_Profile_Data",
                     func=agent_tools.get_profile_data,
-                    description="Fetches user profile data to fill forms. Input should be exactly one of: name, email, phone, resume, password."
+                    description="Fetches standard user profile data. Input MUST be exactly one of: name, email, phone, resume, password."
+                ),
+                Tool(
+                    name="Infer_Answer",
+                    func=self.infer_answer_from_resume,
+                    description="Queries the User's Resume to find the answer to specific/complex HR questions (e.g., 'How many years of Python experience do you have?'). Input is the exact question text on the screen."
                 ),
                 Tool(
                     name="Pause_For_Human",
@@ -260,13 +304,19 @@ class JobApplicationAgent:
 
 You are an autonomous Job Application Agent. Your goal is to navigate the webpage, fill out the entire multi-page application form, and click Submit until the application is 100% completed.
 Look at the CURRENT INTERACTIVE ELEMENTS map and the CURRENT VISUAL SUMMARY below. 
-Find the numeric ID for the inputs you need to fill, or the button you need to click to advance to the next page of the application.
+Find the numeric ID for the inputs you need to fill, or the button you need to click to advance.
 
 CRITICAL INSTRUCTION: You MUST ONLY interact with elements that have a numeric ID listed in the Interactive Elements map below. DO NOT guess or hallucinate IDs. 
 
-AUTH INSTRUCTION: If you are presented with a Login screen for an ATS portal you do not recognize, you MUST find the "Create Account" or "Register" button and click it to start a new account flow. Use the `Get_Profile_Data(email)` and `Get_Profile_Data(password)` tools to fill in the registration details securely. Do not attempt to guess existing logins.
+INTERSTITIAL INSTRUCTION: If you see a 'Accept Cookies', 'Close', or 'No Thanks' button for a non-application popup, execute Click_Element_By_ID on it immediately to clear the screen.
 
-CRITICAL END-STATE INSTRUCTION: DO NOT output a 'Final Answer' unless you physically see a confirmation message on the screen that the application has been successfully submitted (e.g., "Application Complete", "Thank you for applying"). If there are more forms to fill or 'Next' buttons to click, you MUST output an Action.
+AUTH INSTRUCTION: If prompted to 'Sign In', SECONDS before creating a new account, scan the Interactive Elements for an 'Apply as Guest', 'Quick Apply', or 'Autofill with Resume' button. ALWAYS prefer Guest checkout over Account Creation. If Login/Register is mandatory, find the "Create Account" or "Register" button and click it to start a new flow using the `Get_Profile_Data` tools.
+
+MULTI-STEP INSTRUCTION: If you see 'Next' or 'Continue', you are in a multi-step form. Click it, wait for the page to load, and continue filling fields. Do not output Final Answer.
+
+ERROR HANDLING: If the VISUAL SUMMARY specifically mentions 'Red Error Text' or missing fields, you MUST fix those specific fields before clicking Next or Submit again.
+
+CRITICAL END-STATE INSTRUCTION: DO NOT output a 'Final Answer' unless you physically see a confirmation message on the screen stating the application was submitted (e.g., "Application Complete", "Success", "Thank you for applying"). Your Final Answer MUST include the exact text of the success confirmation message.
 
 CURRENT INTERACTIVE ELEMENTS:
 {interactive_elements}
@@ -337,7 +387,7 @@ Thought:{agent_scratchpad}'''
                 # Retrieve Fresh Vision (Screenshot now includes the red SOM bounding boxes!)
                 screenshot_path = "/tmp/agent_vision_loop.png"
                 self.driver.save_screenshot(screenshot_path)
-                vision_req = "Describe the interactive layout of this page. You see red bounding boxes with numbers inside them. What form fields or buttons are visible, and what are their numeric IDs? Be concise."
+                vision_req = "Describe the interactive layout of this page. You see red bounding boxes with numbers inside them. What form fields or buttons are visible (mention their numeric IDs)? CRITICAL: Are there any red error texts or highlighted required fields on this form? If so, list them explicitly."
                 vision_res = self.vision._run_vision_prompt(screenshot_path, vision_req)
                 vision_summary = vision_res.get('raw_response', 'Failed to get vision summary.')
                 

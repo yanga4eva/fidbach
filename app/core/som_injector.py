@@ -237,3 +237,62 @@ def trigger_type_by_id(driver: uc.Chrome, som_map: dict, element_id: str, text: 
             
     except Exception as e:
         return f"CRITICAL Navigation Error typing into {element_id}: {str(e)}"
+
+def trigger_upload_by_id(driver: uc.Chrome, som_map: dict, element_id: str, file_path: str) -> str:
+    """
+    Given an element ID for an <input type="file">, this uses Selenium's native send_keys
+    to push the file path directly to the element, bypassing the OS File Picker dialog
+    which would otherwise freeze the agent.
+    """
+    try:
+        eid = int(element_id)
+        if str(eid) not in som_map and eid not in som_map:
+            return f"Error: Element ID {eid} not found in the current mapping."
+            
+        # We need to find the element natively in Selenium to use send_keys
+        # We can use execute_script to find its exact XPath or simply return it, but 
+        # Selenium JS execution doesn't easily return DOM nodes.
+        # Instead, we inject a temporary unique ID, then find it via By.ID
+        
+        script = f"""
+            const interactables = Array.from(document.querySelectorAll(
+                "button, a, input, select, textarea, [role='button'], [role='link']"
+            )).filter(el => {{
+                // Skip visibility checks for file inputs, they are often perfectly hidden by CSS frameworks!
+                if (el.tagName.toLowerCase() === 'input' && el.type === 'file') return true;
+                
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                const isVisible = (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && rect.width > 5 && rect.height > 5);
+                if (!isVisible) return false;
+                
+                const cX = rect.left + (rect.width / 2);
+                const cY = rect.top + (rect.height / 2);
+                const topEl = document.elementFromPoint(cX, cY);
+                if (!topEl) return false;
+                return el.contains(topEl) || topEl.contains(el);
+            }});
+            
+            const targetEl = interactables[{eid}];
+            if (!targetEl) return false;
+            
+            targetEl.id = 'applygenie-temp-upload-id';
+            return true;
+        """
+        success = driver.execute_script(script)
+        if not success:
+            return f"Error: Failed to locate file input Element {eid} in the DOM."
+            
+        import time
+        from selenium.webdriver.common.by import By
+        time.sleep(0.5)
+        
+        file_input = driver.find_element(By.ID, 'applygenie-temp-upload-id')
+        file_input.send_keys(file_path)
+        
+        # Cleanup the temp ID
+        driver.execute_script("document.getElementById('applygenie-temp-upload-id').removeAttribute('id');")
+        return f"Successfully uploaded file '{file_path}' to Element ID: {eid}."
+        
+    except Exception as e:
+        return f"CRITICAL Navigation Error uploading to {element_id}: {str(e)}"
