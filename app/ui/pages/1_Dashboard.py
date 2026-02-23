@@ -4,12 +4,23 @@ import time
 
 from app.core.credential_logic import profile_manager
 from app.core.agentic_workflow import AGENT_STATE, launch_agent_thread
+from app.core.db import get_all_jobs
+from app.core.job_scraper import JobScraper
+import undetected_chromedriver as uc
 from streamlit.runtime.scriptrunner import add_script_run_ctx
+import pandas as pd
 
 st.set_page_config(page_title="ApplyGenie Dashboard", page_icon="🧞‍♂️", layout="wide")
 
 st.title("🧞‍♂️ ApplyGenie Autonomous Agent")
 st.markdown("Deploy job applications on autopilot using DeepSeek-R1, DeepSeek-VL2, and Xvfb/noVNC.")
+
+def init_scraper_driver():
+    options = uc.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-gpu")
+    return uc.Chrome(options=options, version_main=145)
 
 # Initialize session state for UI updates
 if "agent_running" not in st.session_state:
@@ -54,52 +65,107 @@ with st.sidebar:
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.header("3. Mission Control")
-    job_url = st.text_input("Target Job Application URL", placeholder="https://jobs.lever.co/example/1234")
+    st.header("3. Auto-Hunter Mission Control")
     
-    if st.button("🚀 Launch ApplyGenie", use_container_width=True, type="primary"):
-        if not st.session_state.agent_running:
-            st.session_state.agent_running = True
-            AGENT_STATE["logs"].clear()
-            AGENT_STATE["status"] = "Starting"
-            
-            # Start the agent in a background thread
-            thread = threading.Thread(target=launch_agent_thread, args=(job_url,))
-            add_script_run_ctx(thread)
-            thread.daemon = True
-            thread.start()
-            st.rerun()
-
-    # Dynamic status container
-    st.subheader("Agent Activity Log")
-    log_container = st.empty()
-    status_container = st.empty()
+    tab1, tab2, tab3 = st.tabs(["🎯 Scrape Jobs", "📋 Live Queue", "🤖 Agent Terminal"])
     
-    # Manual Intervention Block
-    if AGENT_STATE["requires_manual_input"]:
-        st.warning(f"⚠️ **MANUAL INTERVENTION REQUIRED**\n\n{AGENT_STATE['manual_input_prompt']}")
-        user_input = st.text_input("Your Input:", key=f"manual_input_{len(AGENT_STATE['logs'])}")
+    with tab1:
+        st.subheader("Fill the Queue")
+        search_query = st.text_input("Job Title / Keywords", placeholder="Lead AI Engineer")
+        location = st.text_input("Location", placeholder="Remote US")
         
-        # Link to VNC
-        st.markdown("[▶️ View Browser in noVNC](http://localhost:8080) (Password: applygenie2026)")
+        board = st.selectbox("Job Board", ["LinkedIn", "Google Jobs"])
         
-        if st.button("Submit Input to Agent"):
-            AGENT_STATE["manual_input_value"] = user_input
-            st.rerun()
+        if st.button("🔍 Scrape & Add to Queue", type="primary"):
+            with st.spinner("Scraping jobs in the background..."):
+                try:
+                    driver = init_scraper_driver()
+                    scraper = JobScraper(driver)
+                    jobs_found = 0
+                    
+                    if board == "LinkedIn":
+                        jobs_found = scraper.scrape_linkedin_jobs(search_query, location)
+                    else:
+                        jobs_found = scraper.scrape_google_jobs(search_query)
+                        
+                    driver.quit()
+                    st.success(f"Added {jobs_found} specific '{search_query}' jobs to the PENDING queue!")
+                except Exception as e:
+                    st.error(f"Scrape failed: {e}")
 
-    # Simple auto-refresh for the logs if running
-    if st.session_state.agent_running:
-        with log_container.container():
-            for log in AGENT_STATE["logs"][-10:]: # Show last 10 logs
-                st.text(f"> {log}")
+    with tab2:
+        st.subheader("Database Job Queue")
         
-        status_container.info(f"Current Status: **{AGENT_STATE['status']}**")
+        # Action Bar
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if st.button("▶️ Start Autonomous Worker", use_container_width=True):
+                if not st.session_state.agent_running:
+                    st.session_state.agent_running = True
+                    AGENT_STATE["logs"].clear()
+                    AGENT_STATE["status"] = "Listening to DB..."
+                    
+                    thread = threading.Thread(target=launch_agent_thread)
+                    add_script_run_ctx(thread)
+                    thread.daemon = True
+                    thread.start()
+                    st.rerun()
+                    
+        with c2:
+            if st.button("🔄 Refresh DB", use_container_width=True):
+                st.rerun()
         
-        if AGENT_STATE["status"] in ["Success", "Failed"]:
-            st.session_state.agent_running = False
+        jobs = get_all_jobs()
+        if not jobs:
+            st.info("The database queue is currently empty. Use the Scrape Jobs tab to find applications.")
         else:
-            time.sleep(1)
+            # Convert to Pandas for pretty Streamlit rendering
+            df = pd.DataFrame(jobs)
+            # Reorder for readability
+            df = df[['id', 'status', 'company', 'title', 'url', 'created_at']]
+            
+            # Styling colors based on status
+            def color_status(val):
+                color = 'gray'
+                if val == 'PENDING': color = 'blue'
+                elif val == 'IN_PROGRESS': color = 'orange'
+                elif val == 'SUCCESS': color = 'green'
+                elif val == 'FAILED': color = 'red'
+                return f'color: {color}; font-weight: bold'
+            
+            st.dataframe(
+                df.style.map(color_status, subset=['status']),
+                hide_index=True,
+                use_container_width=True,
+                height=400
+            )
+
+    with tab3:
+        st.subheader("Live Agent Thoughts")
+        
+        # Manual Intervention Block
+        if AGENT_STATE["requires_manual_input"]:
+            st.warning(f"⚠️ **MANUAL INTERVENTION REQUIRED**\\n\\n{AGENT_STATE['manual_input_prompt']}")
+            user_input = st.text_input("Your Input:", key=f"manual_input_{len(AGENT_STATE['logs'])}")
+            st.markdown("[▶️ View Browser in noVNC](http://localhost:8080) (Password: applygenie2026)")
+            if st.button("Submit Input to Agent"):
+                AGENT_STATE["manual_input_value"] = user_input
+                st.rerun()
+
+        # Dynamic status container
+        if st.session_state.agent_running:
+            status_container = st.empty()
+            status_container.info(f"Current Status: **{AGENT_STATE['status']}**")
+            
+            log_container = st.empty()
+            with log_container.container():
+                for log in AGENT_STATE["logs"][-15:]:
+                    st.text(f"> {log}")
+            
+            time.sleep(2)
             st.rerun()
+        else:
+            st.info("Worker thread is offline. Start it in the Live Queue tab.")
 
 with col2:
     st.header("Visual Monitoring")

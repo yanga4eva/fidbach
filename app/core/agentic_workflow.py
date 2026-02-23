@@ -13,6 +13,7 @@ from selenium.common.exceptions import UnexpectedAlertPresentException, NoAlertP
 from app.core.credential_logic import profile_manager
 from app.core.vision_engine import VisionEngine
 from app.core.dom_parser import compress_dom
+from app.core.db import get_next_pending_job, update_job_status
 import app.core.tools as agent_tools
 
 from fpdf import FPDF
@@ -180,8 +181,11 @@ class JobApplicationAgent:
         update_state("Resumed", f"Received manual input.")
         return value
 
-    def run_application_flow(self, job_url: str):
-        """The main agent loop for searching, tailoring, and applying using LangChain ReAct."""
+    def run_application_flow(self, job_url: str) -> bool:
+        """
+        The main agent loop for navigating and applying.
+        Returns True if successful (Agent Finished with positive final answer), False if failed/timeout.
+        """
         try:
             if not self.driver:
                 self.initialize_browser()
@@ -327,7 +331,7 @@ Thought:{agent_scratchpad}'''
                 
                 if isinstance(response, AgentFinish):
                     update_state("Agent Finished", f"Final Output: {response.return_values['output']}")
-                    break
+                    return True
                 elif isinstance(response, AgentAction):
                     action = response
                     tool_name = action.tool
@@ -347,14 +351,44 @@ Thought:{agent_scratchpad}'''
                     time.sleep(2) # Wait for page reaction
             else:
                 update_state("Timeout", "Agent hit maximum iterations without finishing.")
+                return False
             
         except Exception as e:
             update_state("Failed", f"Agent crashed during application: {e}")
+            return False
         finally:
             if self.driver:
                 pass
+            return False
 
-def launch_agent_thread(job_url: str):
-    """Entry point for threading the agent so Streamlit UI remains responsive."""
+def launch_agent_thread(_unused: str = ""):
+    """
+    Entry point for threading the agent.
+    Acts as an infinite consumer loop, pulling PENDING jobs from SQLite.
+    """
     agent = JobApplicationAgent()
-    agent.run_application_flow(job_url)
+    update_state("Worker Started", "Agent worker thread is online. Waiting for jobs in the queue...")
+    
+    while True:
+        job = get_next_pending_job()
+        if job:
+            job_id = job['id']
+            url = job['url']
+            update_state("Job Pulled", f"Starting Application for: {job['title']} at {job['company']}")
+            
+            # Run the agent
+            success = agent.run_application_flow(url)
+            
+            # Update DB
+            if success:
+                update_job_status(job_id, "SUCCESS", "Application completed successfully.")
+            else:
+                # If it failed, restart the browser session so the next job has a clean slate
+                if agent.driver:
+                    agent.driver.quit()
+                    agent.driver = None
+                update_job_status(job_id, "FAILED", "Agent timed out or crashed.")
+                
+        else:
+            time.sleep(5) # Poll every 5 seconds if queue is empty
+
